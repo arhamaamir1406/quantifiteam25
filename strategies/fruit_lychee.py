@@ -15,6 +15,10 @@ What the data showed (analysis/arham/NOTES.md has the numbers and plots):
     drifts instead of snapping back). Market trades in them happen at the best bid/ask and
     don't predict the next move, so we just sit on the best bid and ask to earn the spread,
     with small position caps because holding them is pure risk.
+  * Over hours, though, LYCHEE gets pulled back toward a "home" price of about 7,436 (same
+    home on all 3 days). So we lean the voucher book: hold up to +150 LYCHEE-equivalents when
+    LYCHEE is 60+ below home and -150 when it's 60+ above (rotation test in
+    analysis/arham/deepdive/rotation/ROTATION_TEST.md: improved every held-out day).
 """
 import math
 from typing import Dict, List, Optional
@@ -43,10 +47,14 @@ class FruitLycheeStrategy:
         "exit": 1.5,  # close it once the price has come back past fair value by this much
         "flow_weight": 0.3,  # coins each recently traded unit moves fair value (buys up, sells down)
         "flow_halflife": 30,  # ticks; how fast we forget those trades
-        "delta_skew": 0.05,  # shade fair values to steer our total LYCHEE exposure back toward 0
+        "delta_skew": 0.05,  # shade fair values to steer our total LYCHEE exposure toward the lean target
         "skew_cap": 5.0,  # never shade a fair value by more than this many coins
-        "lychee_cap": 10,  # quote LYCHEE on both sides, but never hold more than this
+        "lychee_cap": 10,  # quote LYCHEE on both sides, but never hold more than this past the target
         "fruit_cap": 1,  # same for each fruit and the basket
+        "lean_size": 150,  # biggest LYCHEE bet (in LYCHEE-equivalents) on the price returning home
+        "lean_width": 60,  # how far from home LYCHEE must be for the full bet
+        "lean_home": 7435.9,  # LYCHEE's average price over days -2, -1, 0
+        "lean_hold": 100000,  # the home also drifts very slowly toward the live price (ticks of weight)
     }
 
     def __init__(self, params: Optional[dict] = None):
@@ -57,7 +65,8 @@ class FruitLycheeStrategy:
         """Called every tick. Return {product: [Order, ...]}.
         `mem` is this file's private memory: whatever you put in it comes back next tick."""
         result: Dict[str, List[Order]] = self.vouchers(state, mem)
-        result["LYCHEE"] = self.join_quotes("LYCHEE", state, self.p["lychee_cap"])
+        center = max(-190, min(190, int(round(mem.get("target", 0)))))  # LYCHEE quotes lean the same way
+        result["LYCHEE"] = self.join_quotes("LYCHEE", state, self.p["lychee_cap"], center)
         for sym in self.FRUITS:
             result[sym] = self.join_quotes(sym, state, self.p["fruit_cap"])
         return {sym: orders for sym, orders in result.items() if orders}
@@ -116,13 +125,22 @@ class FruitLycheeStrategy:
         exposure = state.position.get("LYCHEE", 0) + sum(
             state.position.get(sym, 0) * d for sym, d in deltas.items())
 
+        #    The exposure we steer toward isn't 0: lean against LYCHEE's distance from home
+        #    (+lean_size when it's lean_width or more below home, -lean_size when as far above).
+        n_home = mem.get("home_n", 0) + 1
+        home = mem.get("home", self.p["lean_home"])
+        home += (S - home) / (self.p["lean_hold"] + n_home)
+        mem["home"], mem["home_n"] = home, n_home
+        target = -self.p["lean_size"] * max(-1.0, min(1.0, (S - home) / self.p["lean_width"]))
+        mem["target"] = target
+
         # 5. Fair price = Black-Scholes at the smile's vol (+ flow and exposure nudges); trade the gap
         out, fairs = {}, {}
         cap = self.p["skew_cap"]
         for sym in xs:
             K = self.VOUCHERS[sym]
             fair = self.bs_call(S, K, T, vols[sym]) + self.p["flow_weight"] * flow[sym]
-            fair -= max(-cap, min(cap, self.p["delta_skew"] * exposure * deltas[sym]))
+            fair -= max(-cap, min(cap, self.p["delta_skew"] * (exposure - target) * deltas[sym]))
             fairs[sym] = fair
             out[sym] = self.revert(sym, state.position.get(sym, 0), self.LIMITS[sym], fair)
         if self.debug is not None:
@@ -179,19 +197,19 @@ class FruitLycheeStrategy:
         return out
 
     # ------------------------------------------------------------------ LYCHEE, fruits, basket
-    def join_quotes(self, sym: str, state: TradingState, cap: int) -> List[Order]:
+    def join_quotes(self, sym: str, state: TradingState, cap: int, center: int = 0) -> List[Order]:
         """Sit on the best bid and the best ask. Market trades happen at exactly those prices,
         so each one that hits us earns half the spread. Quote sizes shrink as we build a
-        position, so it never goes past +-cap."""
+        position, so it never goes past center +- cap."""
         depth = state.order_depths.get(sym)
         if not depth or not depth.buy_orders or not depth.sell_orders:
             return []
         pos = state.position.get(sym, 0)
         orders = []
-        if cap - pos > 0:
-            orders.append(Order(sym, max(depth.buy_orders), cap - pos))
-        if cap + pos > 0:
-            orders.append(Order(sym, min(depth.sell_orders), -(cap + pos)))
+        if center + cap - pos > 0:
+            orders.append(Order(sym, max(depth.buy_orders), center + cap - pos))
+        if cap + pos - center > 0:
+            orders.append(Order(sym, min(depth.sell_orders), -(cap + pos - center)))
         return orders
 
     # ------------------------------------------------------------------ math helpers
