@@ -3,11 +3,16 @@
 Owner: Ali. Only Ali edits this file.
 Rule for build.py: keep ALL your code inside the class (no top-level functions or
 variables), so nothing clashes with the other strategy files once they're pasted together.
+
+Ali2 (Oct 31): Ali's version with changes that beat it on every stress test we ran:
+the 3 days, the 6 half-days, a 3-way rotation (tune on 2 days, test on the 3rd), mirrored
+prices, and TOFFEE moved +-25 or jumping +-30 mid-day.
+Results and scripts: analysis/ali2/ALI2_TEST.md.
 """
+import math
 from typing import Dict, List
 
 from datamodel import Order, TradingState
-from strategies.common import market_make
 
 
 class CoreStrategy:
@@ -26,12 +31,13 @@ class CoreStrategy:
         result: Dict[str, List[Order]] = {}
 
         # AMETHYST: fixed fair value of 10,000 on every tick of all three training days.
-        depth = state.order_depths.get("AMETHYST")
-        if depth is not None:
-            position = state.position.get("AMETHYST", 0)
-            result["AMETHYST"] = market_make(
-                "AMETHYST", depth, position, self.LIMITS["AMETHYST"], fair=10_000
-            )
+        # Take anything through 10,000, otherwise sit ON the best bid/ask (quoting 1 tick
+        # inside them filled less often: 1,075 -> 1,613 over the 3 days).
+        book = state.order_depths.get("AMETHYST")
+        if book is not None and book.buy_orders and book.sell_orders:
+            pos = state.position.get("AMETHYST", 0)
+            result["AMETHYST"] = self._take_and_join(
+                "AMETHYST", book, pos, self.LIMITS["AMETHYST"], fair=10_000, take=1, make=1)
 
         result.update(self.toffee_cake(state, mem))
         result.update(self.paper_lanterns(state, mem))
@@ -72,14 +78,49 @@ class CoreStrategy:
             orders.append(Order(P, int(ask), -min(size, sell_room)))
         return orders
 
+    def _take_and_join(self, P, book, pos, limit, fair, take, make) -> List[Order]:
+        """Buy every ask at least `take` below fair and sell every bid at least `take` above it,
+        then rest the remaining room ON the best bid/ask (never closer than `make` to fair)."""
+        orders: List[Order] = []
+        buy_room, sell_room = limit - pos, limit + pos
+        for price in sorted(book.sell_orders):
+            if price > fair - take or buy_room <= 0:
+                break
+            qty = min(-book.sell_orders[price], buy_room)
+            orders.append(Order(P, price, qty))
+            buy_room -= qty
+        for price in sorted(book.buy_orders, reverse=True):
+            if price < fair + take or sell_room <= 0:
+                break
+            qty = min(book.buy_orders[price], sell_room)
+            orders.append(Order(P, price, -qty))
+            sell_room -= qty
+        bid = min(max(book.buy_orders), math.floor(fair - make))
+        ask = max(min(book.sell_orders), math.ceil(fair + make))
+        if buy_room > 0:
+            orders.append(Order(P, bid, buy_room))
+        if sell_room > 0:
+            orders.append(Order(P, ask, -sell_room))
+        return orders
+
+    def _join(self, P, book, pos, cap) -> List[Order]:
+        """Sit on the best bid and best ask, never holding more than +-cap."""
+        orders: List[Order] = []
+        if cap - pos > 0:
+            orders.append(Order(P, max(book.buy_orders), cap - pos))
+        if cap + pos > 0:
+            orders.append(Order(P, min(book.sell_orders), -(cap + pos)))
+        return orders
+
     # =====================================================================
     # TOFFEE_CAKE: mean-reverting around ~5,000 (reversion strongest at 500 ticks)
     # =====================================================================
     def toffee_cake(self, state: TradingState, mem: dict) -> Dict[str, List[Order]]:
         P = "TOFFEE_CAKE"
-        EMA_WINDOW = 500   # Step 2: reversion strongest at 500 ticks
+        HOME = 5000        # Ali2: TOFFEE averaged 5,002-5,004 on every training day
+        EMA_WINDOW = 4000  # Ali2: was 500, which chased the price and missed half of each bounce
         EDGE = 6           # Step 4: trades happen ~7.5 from mid
-        TAKE = 8           # take any quote at least this far past fair
+        TAKE = 10          # take any quote at least this far past fair (Ali2: was 8)
         SIZE = 10
         SKEW = 0.1
 
@@ -91,10 +132,11 @@ class CoreStrategy:
         pos = state.position.get(P, 0)
         limit = self.LIMITS[P]
 
-        # 1. fair value: slow EMA
-        fair = mem.get("toffee_ema", mid)
+        # 1. fair value: very slow EMA that STARTS at 5,000, so it stays near home but still
+        #    follows if TOFFEE settles at a new level (stress test: whole day shifted +-25)
+        fair = mem.get("toffee_home", HOME)
         fair += 2 / (EMA_WINDOW + 1) * (mid - fair)
-        mem["toffee_ema"] = fair
+        mem["toffee_home"] = fair
 
         orders: List[Order] = []
         buy_room = limit - pos
@@ -122,102 +164,51 @@ class CoreStrategy:
     # =====================================================================
     def paper_lanterns(self, state: TradingState, mem: dict) -> Dict[str, List[Order]]:
         P = "PAPER_LANTERNS"
-        FAST = 20          # smooths the flicker (bounce -0.5)
-        SLOW = 100         # lags behind on trends
-        EDGE = 1           # spread ~4, trades ~2 from mid
-        SIZE = 15
-        TREND_GAIN = 10    # target position = gain * trend
-        CHASE = 15         # take if this far from target
-        SKEW = 0.1
+        EMA = 20           # smooths the flicker (bounce -0.5)
+        LOOK = 100         # Ali2: trends continue; 100-tick moves repeat with correlation +0.77
+        STEP = 10          # remember the smoothed price every 10 ticks (keeps traderData small)
+        K = 0.75           # fair = smoothed price + K x its rise over the last LOOK ticks
+        TAKE = 1           # take any quote at least this far past fair
+        MAKE = 1           # rest the rest on the best bid/ask, never closer than this to fair
 
         top = self._mid(state.order_depths.get(P))
         if top is None:
             return {}
-        best_bid, best_ask, mid = top
+        _, _, mid = top
         book = state.order_depths[P]
         pos = state.position.get(P, 0)
-        limit = self.LIMITS[P]
 
-        # 1. fast and slow EMAs
-        fast = mem.get("pl_fast", mid)
-        slow = mem.get("pl_slow", mid)
-        fast += 2 / (FAST + 1) * (mid - fast)
-        slow += 2 / (SLOW + 1) * (mid - slow)
-        mem["pl_fast"] = fast
-        mem["pl_slow"] = slow
+        # 1. smoothed price, and where it was LOOK ticks ago
+        ema = mem.get("pl_ema", mid)
+        ema += 2 / (EMA + 1) * (mid - ema)
+        mem["pl_ema"] = ema
+        tick = mem.get("pl_tick", 0)
+        hist = mem.setdefault("pl_hist", [])
+        if tick % STEP == 0:
+            hist.append(round(ema, 3))
+            del hist[:-(LOOK // STEP + 1)]
+        mem["pl_tick"] = tick + 1
 
-        # 2-4. trend, fair value, target position
-        trend = fast - slow
-        fair = fast + 0.25 * trend
-        target = max(-limit, min(limit, round(TREND_GAIN * trend)))
-
-        orders: List[Order] = []
-        buy_room = limit - pos
-        sell_room = limit + pos
-
-        # 5. chase the trend if far from target
-        if target - pos > CHASE and buy_room > 0:
-            qty = min(target - pos, buy_room, -book.sell_orders[best_ask])
-            orders.append(Order(P, best_ask, qty))
-            buy_room -= qty
-        elif pos - target > CHASE and sell_room > 0:
-            qty = min(pos - target, sell_room, book.buy_orders[best_bid])
-            orders.append(Order(P, best_bid, -qty))
-            sell_room -= qty
-
-        # 6. quote around fair, skewed toward target (skew uses pos - target)
-        orders += self._quote(P, best_bid, best_ask, pos - target, fair, EDGE, SIZE,
-                              limit + abs(target), SKEW, buy_room, sell_room)
-        return {P: orders}
+        # 2. fair value leans the way the trend is going (Ali2: Ali's fast-slow EMA trend
+        #    with a target position made 27.9K; pricing the trend into fair makes 55.5K)
+        trend = ema - hist[0] if len(hist) == LOOK // STEP + 1 else 0.0
+        fair = ema + K * trend
+        return {P: self._take_and_join(P, book, pos, self.LIMITS[P], fair, TAKE, MAKE)}
 
     # =====================================================================
-    # TELLURIUM: jumps; trade flow predicts the next move (adverse selection)
+    # TELLURIUM: jumps of 100-380, so keep size small and just earn the spread
     # =====================================================================
     def tellurium(self, state: TradingState, mem: dict) -> Dict[str, List[Order]]:
         P = "TELLURIUM"
-        FLOW_WINDOW = 10   # EMA of recent trade direction
-        FLOW_GAIN = 1.0    # how far to shift fair per unit of net flow
-        EDGE = 4           # half-spread ~4.5
-        SIZE = 3           # small: every fill is risky
-        CAP = 10           # Step 5: 100-tick moves up to ~380
-        SKEW = 0.4
-        JUMP = 15          # mid move bigger than this = a jump (avg tick move is 1.3)
-        COOLDOWN = 20      # ticks to only reduce position after a jump
+        CAP = 6            # Ali2: caps 4-8 all positive every day; 15+ swings with the jumps
 
-        top = self._mid(state.order_depths.get(P))
-        if top is None:
+        book = state.order_depths.get(P)
+        if self._mid(book) is None:
             return {}
-        best_bid, best_ask, mid = top
         pos = state.position.get(P, 0)
-        prev_mid = mem.get("tel_mid", mid)
-
-        # 1. trade flow: did recent trades happen above mid (buyers) or below (sellers)?
-        flow_now = 0
-        for t in (state.market_trades or {}).get(P, []):
-            if t.price > prev_mid:
-                flow_now += t.quantity
-            elif t.price < prev_mid:
-                flow_now -= t.quantity
-        flow = mem.get("tel_flow", 0.0)
-        flow += 2 / (FLOW_WINDOW + 1) * (flow_now - flow)
-        mem["tel_flow"] = flow
-
-        # 2. jump guard
-        cool = mem.get("tel_cool", 0)
-        cool = COOLDOWN if abs(mid - prev_mid) > JUMP else max(0, cool - 1)
-        mem["tel_cool"] = cool
-        mem["tel_mid"] = mid
-
-        # 3. fair = mid shifted toward where the flow says price is going
-        fair = mid + FLOW_GAIN * flow
-
-        orders = self._quote(P, best_bid, best_ask, pos, fair, EDGE, SIZE, CAP, SKEW)
-
-        # 4. right after a jump, only keep orders that shrink our position
-        if cool > 0:
-            orders = [o for o in orders
-                      if (o.quantity > 0 and pos < 0) or (o.quantity < 0 and pos > 0)]
-        return {P: orders}
+        # Ali2: the trade-flow fair value lost money (-1.9K; -1.3K with flow off). Sitting on
+        # the best bid/ask makes 1.3K / 5.7K / 7.3K on the 3 days.
+        return {P: self._join(P, book, pos, CAP)}
 
     # =====================================================================
     # JELLY: random walk around ~2,000, medium risk
@@ -226,8 +217,8 @@ class CoreStrategy:
         P = "JELLY"
         EMA_WINDOW = 50
         EDGE = 4           # trades ~5.5 from mid
-        SIZE = 5
-        CAP = 25           # Step 5: 100-tick moves up to ~150
+        SIZE = 2           # Ali2: was 5
+        CAP = 3            # Ali2: was 25. No edge here, so hold less: day-to-day swings 997 -> 360
         SKEW = 0.2
 
         top = self._mid(state.order_depths.get(P))
@@ -248,9 +239,9 @@ class CoreStrategy:
     def peanut_butter(self, state: TradingState, mem: dict) -> Dict[str, List[Order]]:
         P = "PEANUT_BUTTER"
         EMA_WINDOW = 20    # fast: tick move (3.8) > half-spread (3)
-        EDGE = 2           # trades ~3 from mid
-        SIZE = 3
-        CAP = 15           # Step 5: 100-tick moves up to ~170
+        EDGE = 4           # Ali2: was 2 (quote less eagerly)
+        SIZE = 2           # Ali2: was 3
+        CAP = 3            # Ali2: was 15. No edge here, so hold less: day-to-day swings 2,028 -> 755
         SKEW = 0.3
 
         top = self._mid(state.order_depths.get(P))
