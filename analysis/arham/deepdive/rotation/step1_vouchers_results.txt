@@ -1,0 +1,101 @@
+running 141 backtests (18 cached)
+  50/141
+  100/141
+Committed settings: {'enter': 3.5, 'exit': 1.5, 'smile_halflife': 200, 'flow_weight': 0.3, 'flow_halflife': 30, 'delta_skew': 0.05, 'skew_cap': 5.0}
+Baseline per day: {-2: 60720, -1: 62807, 0: 58256}
+
+== smile_halflife (committed: 200)
+          value   day -2   day -1    day 0     total
+             50   +5,714   -1,773     +483    +4,424
+            100   +4,241     -347     +440    +4,334
+            200       +0       +0       +0        +0  <- committed
+            400      +72   -2,147     -502    -2,577
+            800   -1,656  -11,655     +244   -13,067
+   rotation test -2: training picks 100 -> held-out change vs committed +4,241
+   rotation test -1: training picks 50 -> held-out change vs committed -1,773
+   rotation test  0: training picks 50 -> held-out change vs committed +483
+   => held-out change if we let training pick: +2,951 over 3 rotations
+
+== flow_weight (committed: 0.3)
+          value   day -2   day -1    day 0     total
+            0.0     +723   -2,669   -5,022    -6,968
+           0.15     +292   -1,176   -5,240    -6,124
+            0.3       +0       +0       +0        +0  <- committed
+           0.45   -2,022   -2,409   +1,868    -2,563
+            0.6   -2,352   -5,034   +2,364    -5,022
+            0.8   -5,958   -6,271   +2,638    -9,591
+   rotation test -2: training picks 0.3 -> held-out change vs committed +0
+   rotation test -1: training picks 0.6 -> held-out change vs committed -5,034
+   rotation test  0: training picks 0.3 -> held-out change vs committed +0
+   => held-out change if we let training pick: -5,034 over 3 rotations
+
+== flow_halflife (committed: 30)
+          value   day -2   day -1    day 0     total
+             10   -1,220   -3,286   -5,028    -9,534
+             20     +352   -1,271   -2,028    -2,947
+             30       +0       +0       +0        +0  <- committed
+             60      -90   -3,706   +2,250    -1,546
+            120   +5,388   -6,325     +892       -45
+   rotation test -2: training picks 30 -> held-out change vs committed +0
+   rotation test -1: training picks 120 -> held-out change vs committed -6,325
+   rotation test  0: training picks 30 -> held-out change vs committed +0
+   => held-out change if we let training pick: -6,325 over 3 rotations
+
+== delta_skew (committed: 0.05)
+          value   day -2   day -1    day 0     total
+            0.0     +346   -6,662   -3,992   -10,308
+           0.02     -251   -3,113   -1,164    -4,528
+           0.05       +0       +0       +0        +0  <- committed
+            0.1     +558     -739   -3,474    -3,655
+            0.2     +429   -3,745   -6,669    -9,985
+   rotation test -2: training picks 0.05 -> held-out change vs committed +0
+   rotation test -1: training picks 0.05 -> held-out change vs committed +0
+   rotation test  0: training picks 0.05 -> held-out change vs committed +0
+   => held-out change if we let training pick: +0 over 3 rotations
+
+== skew_cap (committed: 5.0)
+          value   day -2   day -1    day 0     total
+            2.0   -1,242      -16     -818    -2,076
+            5.0       +0       +0       +0        +0  <- committed
+           10.0       +0      +29      +16       +45
+   rotation test -2: training picks 10.0 -> held-out change vs committed +0
+   rotation test -1: training picks 10.0 -> held-out change vs committed +29
+   rotation test  0: training picks 10.0 -> held-out change vs committed +16
+   => held-out change if we let training pick: +45 over 3 rotations
+
+== enter/exit (committed: (3.5, 1.5))
+          value   day -2   day -1    day 0     total
+     (2.5, 0.5)   -6,222   -4,984     -994   -12,200
+     (2.5, 1.0)   -4,926   -2,773     -298    -7,997
+     (2.5, 1.5)   -4,372   -1,459     -162    -5,993
+     (2.5, 2.0)   -1,976   -1,033   -2,098    -5,107
+     (3.0, 0.5)   -4,230   -2,841     +204    -6,867
+     (3.0, 1.0)   -2,168     -675   +3,126      +283
+     (3.0, 1.5)   -2,576     +391     +196    -1,989
+     (3.0, 2.0)   -3,162     +461   -1,483    -4,184
+     (3.0, 2.5)   -3,464     -559   -1,882    -5,905
+     (3.5, 0.5)     -980   -1,061     +386    -1,655
+     (3.5, 1.0)     -139     -201   +2,286    +1,946
+     (3.5, 1.5)       +0       +0       +0        +0  <- committed
+     (3.5, 2.0)     +262     -395   -2,455    -2,588
+     (3.5, 2.5)     -517   -1,622   -3,224    -5,363
+     (4.0, 0.5)     +546   -2,907     +208    -2,153
+     (4.0, 1.0)   +1,650     -983     +432    +1,099
+     (4.0, 1.5)     +606     -717   -1,040    -1,151
+     (4.0, 2.0)   +1,206     -520   -3,770    -3,084
+     (4.0, 2.5)     +178   -1,857   -3,382    -5,061
+     (4.5, 0.5)   +1,249   -6,781     +497    -5,035
+     (4.5, 1.0)   +2,221   -3,901     -218    -1,898
+     (4.5, 1.5)     +768   -1,397   -1,636    -2,265
+     (4.5, 2.0)   +2,036   -2,336   -3,220    -3,520
+     (4.5, 2.5)   +2,715   -3,419   -2,480    -3,184
+     (5.0, 0.5)   +1,776   -7,137   +1,516    -3,845
+     (5.0, 1.0)   +1,372   -5,479   +2,588    -1,519
+     (5.0, 1.5)   +1,676   -3,321   +1,738       +93
+     (5.0, 2.0)   +3,234   -2,933     +520      +821
+     (5.0, 2.5)   +3,338   -3,705     -552      -919
+   rotation test -2: training picks (3.0, 1.0) -> held-out change vs committed -2,168
+   rotation test -1: training picks (5.0, 1.0) -> held-out change vs committed -5,479
+   rotation test  0: training picks (4.0, 2.0) -> held-out change vs committed -3,770
+   => held-out change if we let training pick: -11,417 over 3 rotations
+

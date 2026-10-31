@@ -1,0 +1,38 @@
+running 252 backtests (3 cached)
+  50/252
+  100/252
+  150/252
+  200/252
+  250/252
+LYCHEE daily average price: {-2: 7464.2, -1: 7410.2, 0: 7433.2}
+Home price used in each rotation (average of its 2 training days): {'test -2': 7421.7, 'test -1': 7448.7, 'test 0': 7437.2}
+Baseline (no lean) per day: {-2: 60720, -1: 62807, 0: 58256}
+
+A. Gain vs no lean on the HELD-OUT day, fade_w=60 (the candidate's width)
+  size     test -2     test -1      test 0       sum    worst
+    50      +4,242      +4,385      +3,908   +12,535   +3,908
+   100      +7,074      +7,147      +6,762   +20,983   +6,762
+   150     +12,836     +10,905      +9,622   +33,363   +9,622
+   200     +15,257     +12,669     +10,681   +38,607  +10,681
+   250     +17,365     +14,976     +12,237   +44,578  +12,237
+   300     +18,166     +16,472     +15,274   +49,912  +15,274
+
+B. Same, every width: held-out gain (sum over the 3 rotations) and how many of the 3 improved
+  size            w=40            w=60            w=90           w=120
+    50   +12,869 (3/3)   +12,535 (3/3)   +10,665 (3/3)    +9,158 (3/3)
+   100   +23,569 (3/3)   +20,983 (3/3)   +19,556 (3/3)   +15,987 (3/3)
+   150   +35,534 (3/3)   +33,363 (3/3)   +29,259 (3/3)   +24,057 (3/3)
+   200   +46,152 (3/3)   +38,607 (3/3)   +35,437 (3/3)   +30,485 (3/3)
+   250   +54,366 (3/3)   +44,578 (3/3)   +37,192 (3/3)   +34,672 (3/3)
+   300   +56,724 (3/3)   +49,912 (3/3)   +42,582 (3/3)   +36,799 (3/3)
+
+C. Honest pick: in each rotation, choose (size, width) by TRAINING days only, then score the held-out day
+  test day -2: training picks size 300, w=40 (training gain +30,115) -> held-out gain +19,375; size 150/w60 would give +12,836
+  test day -1: training picks size 250, w=40 (training gain +28,439) -> held-out gain +17,683; size 150/w60 would give +10,905
+  test day  0: training picks size 300, w=90 (training gain +27,006) -> held-out gain +10,650; size 150/w60 would give +9,622
+
+D. Size 150, w=60: fixed home vs slowly updated home (hold), with/without centring LYCHEE quotes
+  hold=0      lychee=0: held-out +12,666 +11,482 +7,194  sum +31,342
+  hold=0      lychee=1: held-out +13,450 +12,389 +10,056  sum +35,895
+  hold=100000 lychee=0: held-out +12,132 +9,984 +6,838  sum +28,954
+  hold=100000 lychee=1: held-out +12,836 +10,905 +9,622  sum +33,363
