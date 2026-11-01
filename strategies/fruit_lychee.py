@@ -45,7 +45,7 @@ class FruitLycheeStrategy:
         "smile_halflife": 200,  # ticks; how slowly our estimate of the fair vol smile moves
         "enter": 3.5,  # take a voucher position when the price is this many coins past fair value
         "exit": 1.5,  # close it once the price has come back past fair value by this much
-        "flow_weight": 0.3,  # coins each recently traded unit moves fair value (buys up, sells down)
+        "flow_weight": 0.0,  # coins each recently traded unit moves fair value (buys up, sells down)
         "flow_halflife": 30,  # ticks; how fast we forget those trades
         "delta_skew": 0.05,  # shade fair values to steer our total LYCHEE exposure toward the lean target
         "skew_cap": 5.0,  # never shade a fair value by more than this many coins
